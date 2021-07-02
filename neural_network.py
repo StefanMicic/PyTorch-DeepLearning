@@ -1,19 +1,41 @@
+from typing import Tuple
+
 import torch
 import torch.nn.functional as F
 from loguru import logger as log
 from torch import nn
+from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 
 class Classifier(nn.Module):
-    def __init__(self, D_in, H1, H2, D_out):
+    """ Artificial neural network that classify images. """
+
+    def __init__(self, D_in: int, H1: int, H2: int, D_out: int) -> None:
+        """Init method.
+
+        Args:
+            D_in (int): Input dimension
+            H1 (int): Number of nodes in first hidden layer
+            H2 (int) : Number of nodes in second hidden layer
+            D_out (int) : Output dimension
+        """
         super().__init__()
         self.linear1 = nn.Linear(D_in, H1)
         self.linear2 = nn.Linear(H1, H2)
         self.linear3 = nn.Linear(H2, D_out)
-        self.training_loader, self.validation_loader = self.create_dataset()
+        (
+            self.training_loader,
+            self.validation_loader,
+        ) = self.create_dataset_loaders()
 
-    def create_dataset(self):
+    def create_dataset_loaders(self) -> Tuple[DataLoader, DataLoader]:
+        """Creates data loaders for training and validation.
+
+        Returns:
+            Tuple[DataLoader, DataLoader]:
+                    Training and validation dataset loaders
+        """
         transform = transforms.Compose(
             [
                 transforms.Resize((28, 28)),
@@ -28,21 +50,28 @@ class Classifier(nn.Module):
             root="./data", train=False, download=True, transform=transform
         )
 
-        training_loader = torch.utils.data.DataLoader(
+        training_loader = DataLoader(
             training_dataset, batch_size=100, shuffle=True
         )
-        validation_loader = torch.utils.data.DataLoader(
+        validation_loader = DataLoader(
             validation_dataset, batch_size=100, shuffle=False
         )
         return training_loader, validation_loader
 
-    def forward(self, x):
+    def forward(self, x: float) -> float:
+        """Forward pass in neural network.
+        Args:
+            x (float): Input feature for forward pass
+        Returns:
+            float: Result of forward pass
+        """
         x = F.relu(self.linear1(x))
         x = F.relu(self.linear2(x))
         x = self.linear3(x)
         return x
 
     def train(self):
+        """Trains neural network."""
         criterion = nn.CrossEntropyLoss()
 
         optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)

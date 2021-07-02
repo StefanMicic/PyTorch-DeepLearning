@@ -1,8 +1,12 @@
+from typing import Tuple
+
 import torch
 import torch.nn.functional as F
 from loguru import logger as log
 from torch import nn
-from torch._C import device
+from torch._C import device, float32
+from torch.functional import Tensor
+from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -22,7 +26,8 @@ classes = (
 
 
 class LeNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
+        """Init method."""
         super().__init__()
         self.conv1 = nn.Conv2d(3, 16, 3, 1, padding=1)
         self.conv2 = nn.Conv2d(16, 32, 3, 1, padding=1)
@@ -36,7 +41,13 @@ class LeNet(nn.Module):
         self.val_running_loss_history: list
         self.val_running_corrects_history: list
 
-    def create_dataset(self):
+    def create_dataset(self) -> Tuple[DataLoader, DataLoader]:
+        """Creates data loaders for training and validation.
+
+        Returns:
+            Tuple[DataLoader, DataLoader]:
+                    Training and validation dataset loaders
+        """
         transform_train = transforms.Compose(
             [
                 transforms.Resize((32, 32)),
@@ -66,15 +77,21 @@ class LeNet(nn.Module):
             root="./data", train=False, download=True, transform=transform
         )
 
-        training_loader = torch.utils.data.DataLoader(
+        training_loader = DataLoader(
             training_dataset, batch_size=100, shuffle=True
         )
-        validation_loader = torch.utils.data.DataLoader(
+        validation_loader = DataLoader(
             validation_dataset, batch_size=100, shuffle=False
         )
         return training_loader, validation_loader
 
-    def forward(self, x):
+    def forward(self, x: float) -> float:
+        """Forward pass in neural network.
+        Args:
+            x (float): Input feature for forward pass
+        Returns:
+            float: Result of forward pass
+        """
         x = F.relu(self.conv1(x))
         x = F.max_pool2d(x, 2, 2)
         x = F.relu(self.conv2(x))
@@ -88,8 +105,22 @@ class LeNet(nn.Module):
         return x
 
     def print_metrics(
-        self, epoch_num, epoch_loss, epoch_acc, val_epoch_loss, val_epoch_acc
-    ):
+        self,
+        epoch_num: int,
+        epoch_loss: float,
+        epoch_acc: Tensor,
+        val_epoch_loss: float,
+        val_epoch_acc: Tensor,
+    ) -> None:
+        """Prints all metrics.
+
+        Args:
+            epoch_num (int),
+            epoch_loss (float),
+            epoch_acc (Tensor),
+            val_epoch_loss (float),
+            val_epoch_acc (Tensor),
+        """
         log.info(f"epoch :{(epoch_num + 1)}")
         log.info(f"training loss: {epoch_loss}, acc {epoch_acc.item()}")
         log.info(
@@ -115,9 +146,14 @@ class LeNet(nn.Module):
             running_corrects_history,
         )
 
-    def train(self, epochs: int = 15, lr: float = 0.001):
+    def train(self, epochs: int = 15, learning_rate: float = 0.001):
+        """Trains neural network.
+        Args:
+            epochs (int): Number of epochs for model training
+            lr (float): Speed of learning process
+        """
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
 
         for epoch_num in range(epochs):
 
