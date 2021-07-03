@@ -6,8 +6,11 @@ from loguru import logger as log
 from torch import nn
 from torch._C import device
 from torch.functional import Tensor
+from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+
+from common import calculate_metrics, print_metrics
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -26,6 +29,8 @@ classes = (
 
 
 class LeNet(nn.Module):
+    """Convolutional neural network with LeNet architecture."""
+
     def __init__(self) -> None:
         """Init method."""
         super().__init__()
@@ -35,11 +40,12 @@ class LeNet(nn.Module):
         self.fc1 = nn.Linear(4 * 4 * 64, 500)
         self.dropout1 = nn.Dropout(0.5)
         self.fc2 = nn.Linear(500, 10)
+        self.criterion = nn.CrossEntropyLoss()
         self.training_loader, self.validation_loader = self.create_dataset()
-        self.running_loss_history: list
-        self.running_corrects_history: list
-        self.val_running_loss_history: list
-        self.val_running_corrects_history: list
+        self.running_loss = 0.0
+        self.running_corrects = 0.0
+        self.val_running_loss = 0.0
+        self.val_running_corrects = 0.0
 
     def create_dataset(self) -> Tuple[DataLoader, DataLoader]:
         """Creates data loaders for training and validation.
@@ -71,10 +77,13 @@ class LeNet(nn.Module):
         )
 
         training_dataset = datasets.CIFAR10(
-            root="./data", train=True, download=True, transform=transform_train
+            root="../data",
+            train=True,
+            download=True,
+            transform=transform_train,
         )
         validation_dataset = datasets.CIFAR10(
-            root="./data", train=False, download=True, transform=transform
+            root="../data", train=False, download=True, transform=transform
         )
 
         training_loader = DataLoader(
@@ -104,130 +113,78 @@ class LeNet(nn.Module):
         x = self.fc2(x)
         return x
 
-    def print_metrics(
-        self,
-        epoch_num: int,
-        epoch_loss: float,
-        epoch_acc: Tensor,
-        val_epoch_loss: float,
-        val_epoch_acc: Tensor,
-    ) -> None:
-        """Prints all metrics.
-
-        Args:
-            epoch_num (int),
-            epoch_loss (float),
-            epoch_acc (Tensor),
-            val_epoch_loss (float),
-            val_epoch_acc (Tensor),
-        """
-        log.info(f"epoch :{(epoch_num + 1)}")
-        log.info(f"training loss: {epoch_loss}, acc {epoch_acc.item()}")
-        log.info(
-            f"validation loss: {val_epoch_loss}, validation acc {val_epoch_acc.item()} "  # noqa E501
-        )
-
     def calculate_metrics(
         self,
-        running_loss: float,
-        running_corrects: float,
-        running_loss_history: list,
-        running_corrects_history: list,
         loader: DataLoader,
-    ) -> Tuple[float, float, list, list]:
-        """Forward pass in neural network.
+    ) -> Tuple[float, float]:
+        """Calculates loss and accuracy.
         Args:
-            running_loss (float): current value of loss function
-            running_corrects (list): number of correct predictions
-            running_loss_history (float) : list of losses
-            running_corrects_history (list): list of accuracies
             loader (DataLoader)
         Returns:
-            Tuple[float, float, list, list]:
-                loss value, current accuracy, list of losses
-                and list of accuracies
+            Tuple[float, float]:
+                loss value and current accuracy
         """
-        epoch_loss = running_loss / len(loader)
-        epoch_acc = running_corrects.float() / len(loader)
-        running_loss_history.append(epoch_loss)
-        running_corrects_history.append(epoch_acc)
-        return (
-            epoch_loss,
-            epoch_acc,
-            running_loss_history,
-            running_corrects_history,
-        )
+        epoch_loss = self.running_loss / len(loader)
+        epoch_acc = self.running_corrects.float() / len(loader)
+        return (epoch_loss, epoch_acc)
 
-    def train(self, epochs: int = 15, learning_rate: float = 0.001):
-        """Trains neural network.
+    def batch_iteration(self, optimizer: Adam) -> None:
+        """Goes through training set and does forward and backward pass.
         Args:
-            epochs (int): Number of epochs for model training
-            lr (float): Speed of learning process
+            optimizer(Adam): Optimizer for optimizing weights
         """
-        criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        for inputs, labels in self.training_loader:
+
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            outputs = self(inputs)
+            loss = self.criterion(outputs, labels)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            _, preds = torch.max(outputs, 1)
+            self.running_loss += loss.item()
+            self.running_corrects += torch.sum(preds == labels.data)
+
+    def validation_iteration(self) -> None:
+        """Goes through validation set and predicts."""
+        for val_inputs, val_labels in self.validation_loader:
+            val_inputs = val_inputs.to(device)
+            val_labels = val_labels.to(device)
+            val_outputs = self(val_inputs)
+            val_loss = self.criterion(val_outputs, val_labels)
+
+            _, val_preds = torch.max(val_outputs, 1)
+            self.val_running_loss += val_loss.item()
+            self.val_running_corrects += torch.sum(
+                val_preds == val_labels.data
+            )
+
+    def train(self):
+        """Trains neural network"""
+        epochs = 15
+        optimizer = Adam(self.parameters(), lr=0.001)
 
         for epoch_num in range(epochs):
 
-            running_loss = 0.0
-            running_corrects = 0.0
-            val_running_loss = 0.0
-            val_running_corrects = 0.0
+            self.batch_iteration(optimizer)
+            with torch.no_grad():
+                self.validation_iteration()
 
-            for inputs, labels in self.training_loader:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                outputs = self(inputs)
-                loss = criterion(outputs, labels)
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                _, preds = torch.max(outputs, 1)
-                running_loss += loss.item()
-                running_corrects += torch.sum(preds == labels.data)
-
-            else:
-                with torch.no_grad():
-                    for val_inputs, val_labels in self.validation_loader:
-                        val_inputs = val_inputs.to(device)
-                        val_labels = val_labels.to(device)
-                        val_outputs = self(val_inputs)
-                        val_loss = criterion(val_outputs, val_labels)
-
-                        _, val_preds = torch.max(val_outputs, 1)
-                        val_running_loss += val_loss.item()
-                        val_running_corrects += torch.sum(
-                            val_preds == val_labels.data
-                        )
-
-                (
-                    epoch_loss,
-                    epoch_acc,
-                    self.running_loss_history,
-                    self.running_corrects_history,
-                ) = self.calculate_metrics(
-                    running_loss,
-                    running_corrects,
-                    self.running_loss_history,
-                    self.running_corrects_history,
+                (epoch_loss, epoch_acc) = calculate_metrics(
+                    self.running_loss,
+                    self.running_corrects,
                     self.training_loader,
                 )
-                (
-                    val_epoch_loss,
-                    val_epoch_acc,
-                    self.val_running_loss_history,
-                    self.val_running_corrects_history,
-                ) = self.calculate_metrics(
-                    val_running_loss,
-                    val_running_corrects,
-                    self.val_running_loss_history,
-                    self.val_running_corrects_history,
+                (val_epoch_loss, val_epoch_acc) = calculate_metrics(
+                    self.val_running_loss,
+                    self.val_running_corrects,
                     self.validation_loader,
                 )
 
-            self.print_metrics(
+            print_metrics(
                 epoch_num, epoch_loss, epoch_acc, val_epoch_loss, val_epoch_acc
             )
 

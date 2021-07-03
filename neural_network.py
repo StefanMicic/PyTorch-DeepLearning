@@ -2,10 +2,12 @@ from typing import Tuple
 
 import torch
 import torch.nn.functional as F
-from loguru import logger as log
 from torch import nn
+from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+
+from common import calculate_metrics, print_metrics
 
 
 class Classifier(nn.Module):
@@ -24,10 +26,15 @@ class Classifier(nn.Module):
         self.linear1 = nn.Linear(D_in, H1)
         self.linear2 = nn.Linear(H1, H2)
         self.linear3 = nn.Linear(H2, D_out)
+        self.criterion = nn.CrossEntropyLoss()
         (
             self.training_loader,
             self.validation_loader,
         ) = self.create_dataset_loaders()
+        self.running_loss = 0.0
+        self.running_corrects = 0.0
+        self.val_running_loss = 0.0
+        self.val_running_corrects = 0.0
 
     def create_dataset_loaders(self) -> Tuple[DataLoader, DataLoader]:
         """Creates data loaders for training and validation.
@@ -44,10 +51,10 @@ class Classifier(nn.Module):
             ]
         )
         training_dataset = datasets.MNIST(
-            root="./data", train=True, download=True, transform=transform
+            root="../data", train=True, download=True, transform=transform
         )
         validation_dataset = datasets.MNIST(
-            root="./data", train=False, download=True, transform=transform
+            root="../data", train=False, download=True, transform=transform
         )
 
         training_loader = DataLoader(
@@ -70,70 +77,62 @@ class Classifier(nn.Module):
         x = self.linear3(x)
         return x
 
+    def batch_iteration(self, optimizer: Adam) -> None:
+        for inputs, labels in self.training_loader:
+            inputs = inputs.view(inputs.shape[0], -1)
+            outputs = self(inputs)
+            loss = self.criterion(outputs, labels)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            _, preds = torch.max(outputs, 1)
+            self.running_loss += loss.item()
+            self.running_corrects += torch.sum(preds == labels.data)
+
+    def validation_iteration(self) -> None:
+        """Goes through validation set and predicts."""
+        for val_inputs, val_labels in self.validation_loader:
+            val_inputs = val_inputs.view(val_inputs.shape[0], -1)
+            val_outputs = self(val_inputs)
+            val_loss = self.criterion(val_outputs, val_labels)
+
+            _, val_preds = torch.max(val_outputs, 1)
+            self.val_running_loss += val_loss.item()
+            self.val_running_corrects += torch.sum(
+                val_preds == val_labels.data
+            )
+
     def train(self) -> None:
         """Trains neural network."""
-        criterion = nn.CrossEntropyLoss()
 
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
+        optimizer = Adam(self.parameters(), lr=0.0001)
 
         epochs = 15
-        running_loss_history = []
-        running_corrects_history = []
-        val_running_loss_history = []
-        val_running_corrects_history = []
 
-        for e in range(epochs):
+        for epoch_num in range(epochs):
 
-            running_loss = 0.0
-            running_corrects = 0.0
-            val_running_loss = 0.0
-            val_running_corrects = 0.0
+            self.batch_iteration(optimizer)
 
-            for inputs, labels in self.training_loader:
-                inputs = inputs.view(inputs.shape[0], -1)
-                outputs = self(inputs)
-                loss = criterion(outputs, labels)
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                _, preds = torch.max(outputs, 1)
-                running_loss += loss.item()
-                running_corrects += torch.sum(preds == labels.data)
-
-            else:
-                with torch.no_grad():
-                    for val_inputs, val_labels in self.validation_loader:
-                        val_inputs = val_inputs.view(val_inputs.shape[0], -1)
-                        val_outputs = self(val_inputs)
-                        val_loss = criterion(val_outputs, val_labels)
-
-                        _, val_preds = torch.max(val_outputs, 1)
-                        val_running_loss += val_loss.item()
-                        val_running_corrects += torch.sum(
-                            val_preds == val_labels.data
-                        )
-
-                epoch_loss = running_loss / len(self.training_loader)
-                epoch_acc = running_corrects.float() / len(
-                    self.training_loader
+            with torch.no_grad():
+                self.validation_iteration()
+                (epoch_loss, epoch_acc) = calculate_metrics(
+                    self.running_loss,
+                    self.running_corrects,
+                    self.training_loader,
                 )
-                running_loss_history.append(epoch_loss)
-                running_corrects_history.append(epoch_acc)
-
-                val_epoch_loss = val_running_loss / len(self.validation_loader)
-                val_epoch_acc = val_running_corrects.float() / len(
-                    self.validation_loader
+                (val_epoch_loss, val_epoch_acc) = calculate_metrics(
+                    self.val_running_loss,
+                    self.val_running_corrects,
+                    self.validation_loader,
                 )
-                val_running_loss_history.append(val_epoch_loss)
-                val_running_corrects_history.append(val_epoch_acc)
-                log.info(f"epoch :{(e + 1)}")
-                log.info(
-                    f"training loss: {epoch_loss}, acc {epoch_acc.item()}"
-                )
-                log.info(
-                    f"validation loss: {val_epoch_loss}, validation acc {val_epoch_acc.item()} "  # noqa E501
+                print_metrics(
+                    epoch_num,
+                    epoch_loss,
+                    epoch_acc,
+                    val_epoch_loss,
+                    val_epoch_acc,
                 )
 
 
