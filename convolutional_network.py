@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 from loguru import logger as log
 from torch import nn
-from torch._C import device, float32
+from torch._C import device
 from torch.functional import Tensor
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
@@ -129,12 +129,24 @@ class LeNet(nn.Module):
 
     def calculate_metrics(
         self,
-        running_loss,
-        running_corrects,
-        running_loss_history,
-        running_corrects_history,
-        loader,
-    ):
+        running_loss: float,
+        running_corrects: float,
+        running_loss_history: list,
+        running_corrects_history: list,
+        loader: DataLoader,
+    ) -> Tuple[float, float, list, list]:
+        """Forward pass in neural network.
+        Args:
+            running_loss (float): current value of loss function
+            running_corrects (list): number of correct predictions
+            running_loss_history (float) : list of losses
+            running_corrects_history (list): list of accuracies
+            loader (DataLoader)
+        Returns:
+            Tuple[float, float, list, list]:
+                loss value, current accuracy, list of losses
+                and list of accuracies
+        """
         epoch_loss = running_loss / len(loader)
         epoch_acc = running_corrects.float() / len(loader)
         running_loss_history.append(epoch_loss)

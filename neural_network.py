@@ -70,7 +70,7 @@ class Classifier(nn.Module):
         x = self.linear3(x)
         return x
 
-    def train(self):
+    def train(self) -> None:
         """Trains neural network."""
         criterion = nn.CrossEntropyLoss()
 
